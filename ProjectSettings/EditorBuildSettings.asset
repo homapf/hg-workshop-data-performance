@@ -6,6 +6,9 @@ EditorBuildSettings:
   serializedVersion: 2
   m_Scenes:
   - enabled: 1
+    path: Assets/Scenes/CrowdSimulation.unity
+    guid: 0870b1d9ae3e941e493e93fa1e0e2c80
+  - enabled: 1
     path: Assets/Scenes/Boids.unity
     guid: 7bdc0948929bd4904b3d210902dd9931
   m_configObjects: {}

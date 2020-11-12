@@ -13,14 +13,17 @@ public class CrowdSystem : MonoBehaviour
     [Serializable]
     public struct CrowdSettings
     {
+        public float speed;
+        public float height;
+        public float avoidanceStrength;
     }
 
     public CrowdSettings settings;
     private TransformAccessArray _transformAccessArray;
-    private NativeArray<float3> _positions;
-    private NativeArray<float3> _directions;
     private NativeArray<SpherecastCommand> _surfaceNormalsCommands;
     private NativeArray<RaycastHit> _surfaceNormalsHits;
+    private NativeArray<SpherecastCommand> _avoidanceCommands;
+    private NativeArray<RaycastHit> _avoidanceHits;
     public int crowdSize;
     public float spawnSphereRadius;
     public GameObject crowdPrefab;
@@ -29,13 +32,13 @@ public class CrowdSystem : MonoBehaviour
     {
         _surfaceNormalsCommands = new NativeArray<SpherecastCommand>(crowdSize, Allocator.Persistent);
         _surfaceNormalsHits = new NativeArray<RaycastHit>(crowdSize, Allocator.Persistent);
+        _avoidanceCommands = new NativeArray<SpherecastCommand>(crowdSize, Allocator.Persistent);
+        _avoidanceHits = new NativeArray<RaycastHit>(crowdSize, Allocator.Persistent);
         _transformAccessArray = new TransformAccessArray(crowdSize, 64);
-        _positions = new NativeArray<float3>(crowdSize, Allocator.Persistent);
-        _directions = new NativeArray<float3>(crowdSize, Allocator.Persistent);
         for (int i = 0; i < crowdSize; i++)
         {
             GameObject g = Instantiate(crowdPrefab, UnityEngine.Random.insideUnitSphere * spawnSphereRadius,
-                quaternion.identity);
+                Quaternion.Euler(0,UnityEngine.Random.Range(0,360),0));
             g.transform.position = new Vector3(g.transform.position.x, 0, g.transform.position.z);
             _transformAccessArray.Add(g.transform);
         }
@@ -43,53 +46,47 @@ public class CrowdSystem : MonoBehaviour
 
     private void Update()
     {
-        for (int i = 0; i < _transformAccessArray.length; i++)
-        {
-            _positions[i] = new float3(_transformAccessArray[i].position);
-            _directions[i] = new float3(_transformAccessArray[i].forward);
-        }
-
-        var boidSystemJob = new CrowdSystemJob()
-        {
-            settings = settings
-        };
         var applyBoidPositionJob = new ApplyPositionJob()
         {
             settings = settings,
-            underHits = _surfaceNormalsHits
+            underHits = _surfaceNormalsHits,
+            avoidanceHits = _avoidanceHits
         };
-        JobHandle crowdSimulation = boidSystemJob.Schedule(crowdSize, 64);
-        JobHandle surfaceHandle = SphereCastUnder(_transformAccessArray, crowdSimulation);
+        JobHandle crowdSimulation = SphereRaycastAhead(_transformAccessArray);
+        JobHandle surfaceHandle = SphereCastUnder(_transformAccessArray);
         JobHandle finalHandle = applyBoidPositionJob.Schedule(_transformAccessArray,
             JobHandle.CombineDependencies(surfaceHandle, crowdSimulation));
         finalHandle.Complete();
     }
 
     [BurstCompile]
-    private struct CrowdSystemJob : IJobParallelFor
-    {
-        public CrowdSettings settings;
-
-        public void Execute(int index)
-        {
-        }
-    }
-
     private struct ApplyPositionJob : IJobParallelForTransform
     {
         public CrowdSettings settings;
         [ReadOnly] public NativeArray<RaycastHit> underHits;
+        [ReadOnly] public NativeArray<RaycastHit> avoidanceHits;
 
         public void Execute(int index, TransformAccess transform)
         {
             if (underHits[index].distance != 0)
             {
-                transform.position = underHits[index].point;
+                transform.position = underHits[index].point + (transform.rotation * Vector3.up * settings.height) / 2;
                 transform.rotation =
-                    Quaternion.LookRotation(transform.rotation * Vector3.forward, underHits[index].normal);
-            }
+                    Quaternion.LookRotation(
+                        ProjectOnPlane(
+                            transform.rotation * Vector3.forward +
+                            Avoidance(index,transform), underHits[index].normal),
+                        underHits[index].normal);
 
-            transform.position += transform.rotation * Vector3.forward * 0.1f;
+                transform.position += transform.rotation * Vector3.forward * settings.speed;
+            }
+        }
+
+        private Vector3 Avoidance(int index,TransformAccess transform)
+        {
+            if(math.abs(math.dot(avoidanceHits[index].normal, transform.rotation * Vector3.up))<0.1f)
+                return avoidanceHits[index].normal * settings.avoidanceStrength;
+            return Vector3.zero;
         }
     }
 
@@ -98,14 +95,14 @@ public class CrowdSystem : MonoBehaviour
     {
         float radius = 0.5f;
 
-        for (int i = 0; i < _surfaceNormalsCommands.Length; i++)
+        for (int i = 0; i < _avoidanceCommands.Length; i++)
         {
-            _surfaceNormalsCommands[i] = new SpherecastCommand(
-                transformAccessArray[i].position - transformAccessArray[i].up * 10, radius,
-                transformAccessArray[i].forward, 100);
+            _avoidanceCommands[i] = new SpherecastCommand(
+                transformAccessArray[i].position, radius,
+                transformAccessArray[i].forward, 10);
         }
 
-        var handle = SpherecastCommand.ScheduleBatch(_surfaceNormalsCommands, _surfaceNormalsHits, 64, dependency);
+        var handle = SpherecastCommand.ScheduleBatch(_avoidanceCommands, _avoidanceHits, 64, dependency);
 
         return handle;
     }
@@ -118,7 +115,7 @@ public class CrowdSystem : MonoBehaviour
         for (int i = 0; i < _surfaceNormalsCommands.Length; i++)
         {
             _surfaceNormalsCommands[i] = new SpherecastCommand(
-                transformAccessArray[i].position + transformAccessArray[i].up * 10, radius,
+                transformAccessArray[i].position + transformAccessArray[i].up * settings.height, radius,
                 -transformAccessArray[i].up, 100);
         }
 
@@ -132,7 +129,21 @@ public class CrowdSystem : MonoBehaviour
         _transformAccessArray.Dispose();
         _surfaceNormalsCommands.Dispose();
         _surfaceNormalsHits.Dispose();
-        _positions.Dispose();
-        _directions.Dispose();
+        _avoidanceCommands.Dispose();
+        _avoidanceHits.Dispose();
+    }
+
+    public static float3 ProjectOnPlane(float3 vector, float3 planeNormal)
+    {
+        float sqrMag = math.dot(planeNormal, planeNormal);
+        if (sqrMag < math.FLT_MIN_NORMAL)
+            return vector;
+        else
+        {
+            var dot = math.dot(vector, planeNormal);
+            return new float3(vector.x - planeNormal.x * dot / sqrMag,
+                vector.y - planeNormal.y * dot / sqrMag,
+                vector.z - planeNormal.z * dot / sqrMag);
+        }
     }
 }
