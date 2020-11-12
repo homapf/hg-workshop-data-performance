@@ -12,6 +12,7 @@ public class MostSimpleExample : MonoBehaviour
 {
     public enum Mode
     {
+        Simplest,
         Mono,
         Arrays,
         WithJobs
@@ -19,6 +20,7 @@ public class MostSimpleExample : MonoBehaviour
 
     public Mode mode;
     private List<GameObject> _gameObjects = new List<GameObject>();
+    private List<SimplestCallBehaviour> _simplestClassCalls = new List<SimplestCallBehaviour>();
     private TransformAccessArray _transformAccessArray;
     public int objectCount;
     public float speed;
@@ -35,6 +37,13 @@ public class MostSimpleExample : MonoBehaviour
                 var monoComp = g.AddComponent<MoveUpMonoBehaviour>();
                 monoComp.speed = speed;
             }
+
+            if (mode == Mode.Simplest)
+            {
+                var monoComp = g.AddComponent<SimplestCallBehaviour>();
+                monoComp.speed = speed;
+                _simplestClassCalls.Add(monoComp);
+            }
             _gameObjects.Add(g);
         }
     }
@@ -43,6 +52,12 @@ public class MostSimpleExample : MonoBehaviour
     {
         switch (mode)
         {
+            case Mode.Simplest:
+                for (int i = 0; i < _simplestClassCalls.Count; i++)
+                {
+                    _simplestClassCalls[i].MyUpdate();
+                }
+                break;
             case Mode.Mono:
                 break;
             case Mode.Arrays:
@@ -85,6 +100,21 @@ public class MoveUpMonoBehaviour : MonoBehaviour
     public float speed;
     private void Update()
     {
-        transform.position += Vector3.up;
+        transform.position += Vector3.up * speed;
+    }
+
+    public void MyUpdate()
+    {
+        transform.position += Vector3.up * speed;
+    }
+}
+
+public class SimplestCallBehaviour : MonoBehaviour
+{
+    public float speed;
+
+    public void MyUpdate()
+    {
+        transform.position += Vector3.up * speed;
     }
 }

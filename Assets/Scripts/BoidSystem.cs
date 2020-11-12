@@ -75,8 +75,7 @@ public class BoidSystem : MonoBehaviour
         };
         JobHandle boidSimulation = boidSystemJob.Schedule(boidNumber, 64);
         JobHandle avoidanceHandle = SphereRaycastAhead(_transformAccessArray, boidSimulation);
-        JobHandle finalHandle = applyBoidPositionJob.Schedule(_transformAccessArray,
-            JobHandle.CombineDependencies(avoidanceHandle, boidSimulation));
+        JobHandle finalHandle = applyBoidPositionJob.Schedule(_transformAccessArray,JobHandle.CombineDependencies(avoidanceHandle, boidSimulation));
         finalHandle.Complete();
     }
 

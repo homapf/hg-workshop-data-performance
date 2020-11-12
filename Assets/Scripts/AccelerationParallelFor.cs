@@ -59,8 +59,6 @@ public class AccelerationParallelFor : MonoBehaviour
 
         public void Execute(int i)
         {
-            // here, i'm intentionally using the index to affect acceleration (it looks cool),
-            // but generating velocities probably wouldn't be tied to index normally.
             velocity[i] += (acceleration + i * accelerationMod) * deltaTime;
         }
     }
